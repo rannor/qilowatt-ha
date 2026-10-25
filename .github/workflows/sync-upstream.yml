@@ -65,7 +65,7 @@ jobs:
         run: |
           tag="${{ steps.up.outputs.tag }}-kkp"
           git push origin HEAD:main 2>push.err || { echo "::error::git push failed: $(tr '\n' ' ' < push.err)"; exit 1; }
-          gh release create "$tag" --target main --title "$tag" \
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target main --title "$tag" \
             --notes "Upstream [${{ steps.up.outputs.tag }}](https://github.com/$UPSTREAM/releases/tag/${{ steps.up.outputs.tag }}) + KKP Fronius adapter." \
             2>rel.err || { echo "::error::release create failed: $(tr '\n' ' ' < rel.err)"; exit 1; }
           echo "::notice::published $tag"
@@ -78,7 +78,7 @@ jobs:
           echo "::error::$title"
           # Issues are optional on a fork; the failed run (GitHub emails on failure) is the alert.
           if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" = "true" ] && \
-             [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
-            gh issue create --title "$title" --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+             [ -z "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
           exit 1
