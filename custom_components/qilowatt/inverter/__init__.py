@@ -5,6 +5,7 @@ from .solarman_sofar import SolarmanSofarInverter
 from .sofar import SofarInverter
 from .esphome import EspHomeInverter
 from .victron import VictronInverter
+from .fronius import FroniusInverter  # KKP custom adapter (not upstream)
 
 # from .deye_synsynk import SynsynkInverter
 # from .growatt import GrowattInverter
@@ -18,6 +19,7 @@ INVERTER_INTEGRATIONS = {
     "Huawei": HuaweiInverter,
     "EspHome": EspHomeInverter,
     "Victron": VictronInverter,
+    "Fronius": FroniusInverter,  # KKP custom
 }
 
 

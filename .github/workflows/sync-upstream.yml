@@ -1,0 +1,77 @@
+# Fork-only: follow qilowatt/qilowatt-ha releases and republish them with the
+# KKP Fronius adapter on top, as "<upstream tag>-kkp" releases that HACS offers
+# as normal updates. A merge conflict or failing test opens an issue instead.
+name: Sync upstream release
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency: sync-upstream
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: qilowatt/qilowatt-ha
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find latest upstream release
+        id: up
+        run: |
+          tag=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/${tag}-kkp" >/dev/null 2>&1; then
+            echo "Already published ${tag}-kkp"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream release
+        if: steps.up.outputs.skip != 'true'
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch --no-tags upstream "refs/tags/${{ steps.up.outputs.tag }}:refs/upstream-tag"
+          if ! git merge --no-edit -m "Merge upstream ${{ steps.up.outputs.tag }}" refs/upstream-tag; then
+            git merge --abort; echo "failed=merge conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.up.outputs.skip != 'true' && steps.merge.outputs.failed == ''
+        with:
+          python-version: "3.13"
+
+      - name: Test
+        if: steps.up.outputs.skip != 'true' && steps.merge.outputs.failed == ''
+        id: test
+        run: |
+          pip install -q -r requirements_test.txt
+          pytest -q || echo "failed=tests failing" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.up.outputs.skip != 'true' && steps.merge.outputs.failed == '' && steps.test.outputs.failed == ''
+        run: |
+          tag="${{ steps.up.outputs.tag }}-kkp"
+          git push origin HEAD:main
+          gh release create "$tag" --target main --title "$tag" \
+            --notes "Upstream [${{ steps.up.outputs.tag }}](https://github.com/$UPSTREAM/releases/tag/${{ steps.up.outputs.tag }}) + KKP Fronius adapter."
+
+      - name: Report failure
+        if: steps.merge.outputs.failed != '' || steps.test.outputs.failed != ''
+        run: |
+          reason="${{ steps.merge.outputs.failed }}${{ steps.test.outputs.failed }}"
+          title="Upstream ${{ steps.up.outputs.tag }} needs manual sync ($reason)"
+          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
+            gh issue create --title "$title" --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+          exit 1
