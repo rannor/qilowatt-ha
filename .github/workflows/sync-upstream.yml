@@ -29,6 +29,7 @@ jobs:
         id: up
         run: |
           tag=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          echo "::notice::upstream latest $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/${tag}-kkp" >/dev/null 2>&1; then
             echo "Already published ${tag}-kkp"; echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -57,21 +58,27 @@ jobs:
         run: |
           pip install -q -r requirements_test.txt
           pytest -q || echo "failed=tests failing" >> "$GITHUB_OUTPUT"
+          echo "::notice::tests step done"
 
       - name: Publish release
         if: steps.up.outputs.skip != 'true' && steps.merge.outputs.failed == '' && steps.test.outputs.failed == ''
         run: |
           tag="${{ steps.up.outputs.tag }}-kkp"
-          git push origin HEAD:main
+          git push origin HEAD:main 2>push.err || { echo "::error::git push failed: $(tr '\n' ' ' < push.err)"; exit 1; }
           gh release create "$tag" --target main --title "$tag" \
-            --notes "Upstream [${{ steps.up.outputs.tag }}](https://github.com/$UPSTREAM/releases/tag/${{ steps.up.outputs.tag }}) + KKP Fronius adapter."
+            --notes "Upstream [${{ steps.up.outputs.tag }}](https://github.com/$UPSTREAM/releases/tag/${{ steps.up.outputs.tag }}) + KKP Fronius adapter." \
+            2>rel.err || { echo "::error::release create failed: $(tr '\n' ' ' < rel.err)"; exit 1; }
+          echo "::notice::published $tag"
 
       - name: Report failure
         if: steps.merge.outputs.failed != '' || steps.test.outputs.failed != ''
         run: |
           reason="${{ steps.merge.outputs.failed }}${{ steps.test.outputs.failed }}"
           title="Upstream ${{ steps.up.outputs.tag }} needs manual sync ($reason)"
-          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
+          echo "::error::$title"
+          # Issues are optional on a fork; the failed run (GitHub emails on failure) is the alert.
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" = "true" ] && \
+             [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
             gh issue create --title "$title" --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
           exit 1
