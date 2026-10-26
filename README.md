@@ -81,7 +81,7 @@ After a few minutes, your Qilowatt sensors in Home Assistant should start showin
 The Qilowatt integration **does not directly control your inverter**. It provides a set of sensors that reflect the commands sent by Qilowatt. You must create your own automations in Home Assistant to act on these sensor changes.
 
 ### Key Sensors for Automation
--   `sensor.qw_mode`: The current command (`normal`, `buy`, `sell`, `frrup`, etc.).
+-   `sensor.qw_mode`: The current command (`normal`, `buy`, `sell`, `frrup`, etc.). *(KKP fork)* Also carries the whole command as attributes `source`, `power_limit` and `battery_soc`, written in the same state update as the mode. Read these instead of `sensor.qw_source` / `sensor.qw_powerlimit` / `sensor.qw_batterysoc` in automations triggered by a mode change: those sensors update one by one after `qw_mode`, so they can still hold the previous command's values when the automation runs.
 -   `sensor.qw_source`: The origin of the command (`timer`, `fusebox`, `optimizer`).
 -   `sensor.qw_powerlimit`: The target power in Watts (always a positive value).
 -   `binary_sensor.qw_connected`: Shows the status of the MQTT connection to Qilowatt. Use this to build failsafe automations (e.g., revert to a safe mode if the connection is lost).

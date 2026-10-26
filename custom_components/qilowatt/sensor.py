@@ -21,6 +21,11 @@ _LOGGER = logging.getLogger(__name__)
 
 ENTITY_ID_FORMAT = "sensor.{}"
 
+# Command snapshot attributes on the Mode sensor (KKP fork)
+ATTR_SOURCE = "source"
+ATTR_POWER_LIMIT = "power_limit"
+ATTR_BATTERY_SOC = "battery_soc"
+
 # Descriptions for each WORKMODE command field exposed as a sensor
 WORKMODE_SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -126,4 +131,15 @@ class WorkModeSensor(SensorEntity):
         """Handle WORKMODE command updates."""
         _LOGGER.debug("WorkModeSensor '%s' handling update.", self.name)
         self._attr_native_value = getattr(command, self.entity_description.key, None)
+        if self.entity_description.key == "Mode":
+            # KKP: carry the whole command on the Mode sensor so automations can
+            # read mode + source + targets from one atomic state write. The other
+            # WORKMODE sensors update one after another, so an automation reacting
+            # to sensor.qw_mode would otherwise still see the previous command's
+            # sensor.qw_source / qw_powerlimit / qw_batterysoc.
+            self._attr_extra_state_attributes = {
+                ATTR_SOURCE: getattr(command, "_source", None),
+                ATTR_POWER_LIMIT: getattr(command, "PowerLimit", None),
+                ATTR_BATTERY_SOC: getattr(command, "BatterySoc", None),
+            }
         self.async_write_ha_state()
