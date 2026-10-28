@@ -43,8 +43,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "https://github.com/$UPSTREAM.git"
           git fetch --no-tags upstream "refs/tags/${{ steps.up.outputs.tag }}:refs/upstream-tag"
-          if ! git merge --no-edit -m "Merge upstream ${{ steps.up.outputs.tag }}" refs/upstream-tag; then
+          if ! git merge --no-commit --no-ff refs/upstream-tag; then
             git merge --abort; echo "failed=merge conflict" >> "$GITHUB_OUTPUT"
+          else
+            # Keep the fork's own workflow files: the job's GITHUB_TOKEN may not push
+            # changes under .github/workflows (needs the `workflows` permission), so an
+            # upstream CI tweak would otherwise block every sync. Upstream workflow
+            # changes are dropped; port them by hand if one is ever wanted.
+            git restore --source=HEAD --staged --worktree -- .github/workflows
+            if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+              git commit --no-edit -m "Merge upstream ${{ steps.up.outputs.tag }} (fork keeps its own workflows)"
+            fi
           fi
 
       - uses: actions/setup-python@v5
