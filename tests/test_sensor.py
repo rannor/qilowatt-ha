@@ -1,9 +1,10 @@
-"""WORKMODE sensors: the Mode sensor carries an atomic command snapshot (KKP fork)."""
+"""WORKMODE sensors (the Mode sensor's command snapshot is KKP-fork only)."""
 
 from unittest.mock import patch
 
 from qilowatt import WorkModeCommand
 
+from custom_components.qilowatt.const import DATA_CLIENT, DOMAIN
 from custom_components.qilowatt.sensor import WORKMODE_SENSORS, WorkModeSensor
 
 
@@ -47,3 +48,67 @@ async def test_other_sensors_have_no_snapshot(hass, config_entry):
         )
     assert sensor.native_value == 900
     assert not sensor.extra_state_attributes
+
+
+def _command(**fields):
+    return WorkModeCommand.from_dict({"Mode": "normal", "_source": "optimizer", **fields})
+
+
+async def test_command_received_before_sensors_subscribe_is_not_lost(hass, config_entry, no_mqtt):
+    """At startup the broker sends WORKMODE before the sensor platform is set up."""
+
+
+    real_forward = hass.config_entries.async_forward_entry_setups
+
+    async def forward_after_command(entry, platforms):
+        client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
+        # Arrives on the MQTT thread; handled on the loop before platforms load
+        await hass.async_add_executor_job(
+            client._on_command_received, _command(Mode="sell", PowerLimit=5000)
+        )
+        await hass.async_block_till_done()
+        await real_forward(entry, platforms)
+
+    hass.config_entries.async_forward_entry_setups = forward_after_command
+    try:
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_forward_entry_setups = real_forward
+
+    assert hass.states.get("sensor.qw_mode").state == "sell"
+    assert hass.states.get("sensor.qw_powerlimit").state == "5000"
+
+    # Later commands still update the sensors
+    client = hass.data[DOMAIN][config_entry.entry_id][DATA_CLIENT]
+    await hass.async_add_executor_job(client._on_command_received, _command(Mode="buy"))
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.qw_mode").state == "buy"
+
+
+async def test_startup_command_carries_snapshot(hass, config_entry, no_mqtt):
+    """KKP: the command kept from before subscribe also fills the Mode snapshot."""
+
+    real_forward = hass.config_entries.async_forward_entry_setups
+
+    async def forward_after_command(entry, platforms):
+        client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
+        await hass.async_add_executor_job(
+            client._on_command_received,
+            _command(Mode="frrup", _source="qilowatt", PowerLimit=900, BatterySoc=40),
+        )
+        await hass.async_block_till_done()
+        await real_forward(entry, platforms)
+
+    hass.config_entries.async_forward_entry_setups = forward_after_command
+    try:
+        await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_forward_entry_setups = real_forward
+
+    state = hass.states.get("sensor.qw_mode")
+    assert state.state == "frrup"
+    assert state.attributes["source"] == "qilowatt"
+    assert state.attributes["power_limit"] == 900
+    assert state.attributes["battery_soc"] == 40

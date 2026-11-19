@@ -15,7 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, async_generate_entity_id
 from qilowatt import WorkModeCommand
 
-from .const import CONF_INVERTER_ID, DOMAIN
+from .const import CONF_INVERTER_ID, DATA_CLIENT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,10 +126,20 @@ class WorkModeSensor(SensorEntity):
                 self._handle_workmode_update,
             )
         )
+        # A command that arrived before this sensor subscribed (the broker
+        # sends one right after connecting) would otherwise be lost.
+        client = self.hass.data[DOMAIN][self.entry.entry_id][DATA_CLIENT]
+        if client.last_command is not None:
+            self._apply_command(client.last_command)
 
     async def _handle_workmode_update(self, command: WorkModeCommand):
         """Handle WORKMODE command updates."""
         _LOGGER.debug("WorkModeSensor '%s' handling update.", self.name)
+        self._apply_command(command)
+        self.async_write_ha_state()
+
+    def _apply_command(self, command: WorkModeCommand) -> None:
+        """Set this sensor's value (and the Mode snapshot) from a command."""
         self._attr_native_value = getattr(command, self.entity_description.key, None)
         if self.entity_description.key == "Mode":
             # KKP: carry the whole command on the Mode sensor so automations can
@@ -142,4 +152,3 @@ class WorkModeSensor(SensorEntity):
                 ATTR_POWER_LIMIT: getattr(command, "PowerLimit", None),
                 ATTR_BATTERY_SOC: getattr(command, "BatterySoc", None),
             }
-        self.async_write_ha_state()
